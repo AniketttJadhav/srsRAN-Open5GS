@@ -8,7 +8,6 @@
 *.fdb_latexmk
 *.blg
 *.bbl
-report/main.pdf
 
 # Windows
 Thumbs.db
