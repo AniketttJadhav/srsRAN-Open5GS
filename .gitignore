@@ -1,0 +1,19 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.blg
+*.bbl
+report/main.pdf
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# VS Code
+.vscode/
+```
