@@ -1,0 +1,557 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+
+\title{Near-Real-Time ISAC-Based Jammer Detection and Localization using srsRAN\\}
+
+\author{\IEEEauthorblockN{Samanvitha Balijepalli}
+\IEEEauthorblockA{\textit{Dept. of ECE} \\
+\textit{Rice University}\\
+Houston, USA \\
+sb273@rice.edu}
+\and
+\IEEEauthorblockN{Aniket Jadhav}
+\IEEEauthorblockA{\textit{Dept. of ECE} \\
+\textit{Rice University}\\
+Houston, USA \\
+aj156@rice.edu}
+\and
+\IEEEauthorblockN{Sandra Mansour}
+\IEEEauthorblockA{\textit{Dept. of ECE} \\
+\textit{Rice University}\\
+Houston, USA  \\
+sm367@rice.edu}
+}
+
+\maketitle
+
+\begin{abstract}
+Malicious jammers threaten wireless communications yet detecting them
+typically requires costly dedicated RF monitoring hardware. This work
+presents a software-based 5G framework for jammer detection and future
+localization using the srsRAN stack without hardware modification. The
+system reserves quiet symbol intervals within the 5G NR frame, creating
+standards-compliant sensing windows at only $\approx$1.4\% scheduling
+overhead. SNR and jammer power extracted from these windows feed
+lightweight threshold-based classifiers. In a controlled ZMQ software
+testbed, jammer power achieves perfect classification (F1\,=\,1.0) while
+SNR-based detection reaches 92.18\% accuracy (F1\,=\,0.957). A
+MUSIC-based angle-of-arrival baseline is separately validated, confirming
+readiness for Phase~2 localization. Although results reflect a simulated
+environment, they demonstrate feasible low-overhead jammer sensing and
+establish a concrete foundation for near-real-time localization on USRP
+hardware.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Integrated Sensing and Communication (ISAC), jammer detection, jammer
+localization, srsRAN, 5G NR, wireless sensing, threshold-based detection,
+MUSIC, angle-of-arrival
+\end{IEEEkeywords}
+
+
+% -----------------------------------------------------------------------
+\section{Introduction}
+% -----------------------------------------------------------------------
+
+
+Malicious radio-frequency jammers pose an increasingly significant threat
+to modern wireless systems. By flooding target bands with continuous-wave
+or broadband interference, they can disable GPS receivers, degrade LTE/5G
+base-station links, and disrupt safety-critical services such as emergency
+communications and unmanned aerial vehicle control~\cite{3gpp38211}.
+Conventional jammer detection relies on dedicated spectrum-monitoring
+hardware — receivers, direction-finding antennas, and spectrum analysers —
+that must be separately purchased, maintained, and re-tuned whenever
+operating conditions change. This cost barrier motivates the development
+of software-defined alternatives that reuse existing communication
+infrastructure for sensing.
+
+Integrated Sensing and Communication (ISAC) has emerged as a key
+direction for next-generation wireless systems, enabling communication
+infrastructure to simultaneously support sensing, detection, and
+localization tasks~\cite{1143830,article}. By sharing radio resources
+between data transmission and environmental awareness, ISAC improves
+spectrum efficiency while eliminating the need for separate sensing
+hardware. Open and programmable 5G software stacks, such as
+srsRAN~\cite{srsran_docs} and Open5GS~\cite{open5gs_site}, provide a
+particularly attractive experimental foundation because they expose
+scheduler internals that commercial equipment conceals.
+
+
+\subsection*{Related Work}
+
+High-resolution subspace methods have long been the foundation of
+direction-of-arrival (DoA) estimation. MUSIC (Multiple Signal
+Classification), introduced by Schmidt~\cite{1143830}, decomposes the
+array covariance matrix into signal and noise subspaces, yielding a
+pseudospectrum with sharp peaks at true source angles. Root-MUSIC~\cite{45540}
+and ESPRIT~\cite{32276} extend this framework by replacing grid search with
+polynomial rooting or subspace rotation, reducing computation while
+preserving resolution. Sparse reconstruction methods~\cite{inbook} offer
+further gains under limited snapshots but at higher algorithmic complexity.
+SpotFi~\cite{article} demonstrated that OFDM channel state information
+(CSI) — already collected during normal Wi-Fi communication — can feed a
+modified MUSIC pipeline for indoor localization, achieving sub-meter
+accuracy without additional hardware. A key limitation of SpotFi is that
+it assumes cooperative access points and a static, well-characterized
+indoor environment. Our work targets the more adversarial setting of
+jammer localization in a 5G NR environment, where the interference
+source is uncooperative, the signal structure is unknown, and
+software-defined gNB modifications are required to create sensing
+opportunities in the first place.
+
+This work presents a software-based framework for jammer detection and
+future localization using srsRAN within an open 5G communication
+environment. Rather than relying on dedicated sensing signals or external
+RF instrumentation, the proposed system creates standards-compliant sensing
+opportunities directly from the communication process by reserving quiet
+symbol intervals within the 5G NR frame. As illustrated in
+Fig.~\ref{fig:system_framework}, the current phase focuses on jammer
+detection using communication-quality indicators such as SNR and jammer
+power, while the future phase extends the framework toward localization
+using richer signal features and the MUSIC algorithm.
+
+The main contributions of this work are: (i) a low-overhead,
+scheduler-based sensing design that creates quiet windows inside the 5G
+NR frame with only $\approx$1.4\% resource overhead; (ii) an evaluation
+of threshold-based jammer detectors showing that jammer power achieves
+perfect separation in the current dataset; and (iii) a validated
+MUSIC-based angle-of-arrival baseline that serves as the localization
+reference for the next phase. Together these results establish a practical
+foundation for near-real-time jammer localization in an open-source 5G
+platform.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.48\textwidth]{Abstract.png}
+    \caption{Joint communication and sensing framework for jammer detection
+    and localization using data-scheduling-based sensing opportunities in a
+    5G gNB. Phase~1 (current work) performs detection; Phase~2+ will
+    estimate jammer position using frequency-domain and time-of-flight
+    features fed into the MUSIC estimator.}
+    \label{fig:system_framework}
+\end{figure}
+
+
+% -----------------------------------------------------------------------
+\section{Methodology}
+% -----------------------------------------------------------------------
+
+
+
+\subsection{System Architecture}
+
+The proposed system is built on the srsRAN~\cite{srsran_docs} 5G software
+stack and uses communication-driven sensing opportunities to detect and
+eventually localize jammer activity without dedicated sensing hardware.
+The full platform consists of an Open5GS~\cite{open5gs_site} core network,
+a modified srsRAN gNB, an srsUE instance, and a jammer proxy inserted
+into the ZeroMQ (ZMQ) signal path, as shown in Fig.~\ref{fig:system_flowchart}.
+
+The gNB scheduler was modified to blank two OFDM symbols per sensing
+period, creating periodic \emph{quiet windows} during which the transmitter
+is silent and the receiver captures ambient RF energy, interference, and
+jammer-induced signal components. IQ samples from these windows are stored
+for post-processing. Simultaneously, the jammer proxy logs UE power,
+jammer power, and signal-to-interference ratio (SIR) values synchronized
+to the same slot timeline, providing the ground-truth labels needed for
+detection evaluation.
+
+A post-processing layer converts the captured IQ data and signal logs into
+MATLAB-compatible data structures. In the current stage, sensing is
+performed using communication-quality indicators derived from the scheduled
+windows — particularly SNR and jammer power — processed by lightweight
+threshold-based detectors. The longer-term goal is to extend this pipeline
+toward localization using richer signal features and the MUSIC
+algorithm~\cite{1143830}, consistent with prior structured-measurement
+approaches such as SpotFi~\cite{article}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{System Architecture.png}
+    \caption{System architecture and processing flow for the proposed
+    sensing framework.}
+    \label{fig:system_flowchart}
+\end{figure}
+
+\subsection{Data-Scheduling-Based Sensing Design}
+
+Rather than relying on Sounding Reference Signal (SRS) sweeps, the
+framework introduces sensing opportunities directly through data
+scheduling within the 5G NR frame, motivated by 3GPP TS~38.211
+Table~4.3.2-1~\cite{3gpp38211}, which designates symbols 12 and 13 as
+flexible symbols in standard TDD slot formats. When configured as downlink
+quiet symbols, these intervals let the gNB observe the channel without
+expecting UE transmission.
+
+A new configuration structure was added to srsRAN to expose
+sensing-related parameters: enable flag, quiet symbol start index, quiet
+symbol count, and sensing period in slots. At 30~kHz subcarrier spacing
+one slot lasts 0.5~ms, and reserving 2 symbols once every 10 slots yields
+a sensing overhead of
+\[
+\text{Overhead} = \frac{2}{10 \times 14} = \frac{2}{140} \approx 1.4\%.
+\]
+This small resource cost creates periodic sensing opportunities within the
+normal communication process.
+
+During each quiet sensing window, IQ samples are captured from the receive
+path and written to disk. The jammer proxy simultaneously injects
+controlled continuous-wave (CW) interference and logs UE power, jammer
+power, and SIR. These synchronized measurements are the input to the
+detection stage described next.
+
+\subsection{Detection and Localization Processing Framework}
+
+A MATLAB post-processing framework was developed to analyze the sensing
+measurements captured during the scheduled quiet windows. The main
+variables in the current stage are time, measured SNR, jammer power, and
+a ground-truth jammer-state label (OFF / ON).
+
+To quantify class separability, summary statistics were computed. The
+sample mean and standard deviation are
+\begin{equation}
+\mu = \frac{1}{N}\sum_{i=1}^{N} x_i, \qquad
+\sigma = \sqrt{\frac{1}{N-1}\sum_{i=1}^{N}(x_i-\mu)^2}.
+\end{equation}
+
+Using class means, the midpoint thresholds are
+\begin{equation}
+T_{\mathrm{SNR}} = \frac{\mu_{\mathrm{SNR,OFF}} + \mu_{\mathrm{SNR,ON}}}{2}, \quad
+T_{\mathrm{JP}} = \frac{\mu_{\mathrm{JP,OFF}} + \mu_{\mathrm{JP,ON}}}{2}.
+\end{equation}
+
+The three detectors are defined as
+\begin{align}
+\hat{y}_{\mathrm{SNR}}(i) &=
+\begin{cases} 1, & \mathrm{SNR}(i) < T_{\mathrm{SNR}} \\ 0, & \text{otherwise,} \end{cases}
+\label{eq:snr_det} \\
+\hat{y}_{\mathrm{JP}}(i) &=
+\begin{cases} 1, & P_J(i) > T_{\mathrm{JP}} \\ 0, & \text{otherwise,} \end{cases}
+\label{eq:jp_det} \\
+\hat{y}_{\mathrm{C}}(i) &=
+\begin{cases} 1, & \hat{y}_{\mathrm{SNR}}(i)=1 \;\lor\; \hat{y}_{\mathrm{JP}}(i)=1 \\ 0, & \text{otherwise.} \end{cases}
+\label{eq:combined_det}
+\end{align}
+
+Overall accuracy is
+\begin{equation}
+\mathrm{Acc} = \frac{TP + TN}{TP + TN + FP + FN}.
+\label{eq:accuracy}
+\end{equation}
+
+
+Because the dataset is class-imbalanced (501 OFF vs.\ 8953 ON samples,
+roughly a 1:18 ratio), accuracy alone can be misleading. We therefore
+also report precision $P = TP/(TP+FP)$, recall $R = TP/(TP+FN)$, and
+F1-score $F_1 = 2PR/(P+R)$ for each detector.
+
+To support the future localization stage, a separate framework evaluates
+MUSIC-based angle-of-arrival (AoA) estimation using a 3-element uniform
+linear array (ULA). Spatial covariance matrix decomposition separates the
+signal and noise subspaces, after which the MUSIC pseudospectrum is
+evaluated for angle estimation. This stage is not yet integrated into the
+srsRAN sensing path but provides a validated reference model consistent
+with prior high-resolution methods~\cite{1143830,45540,32276,inbook}.
+
+\subsection{srsRAN Test Environment}
+
+The full system was deployed on a Linux server using the srsRAN 5G
+software stack, Open5GS core network, and ZMQ-based simulated radio links.
+The system was configured for NR Band~3 (center frequency 1842.5~MHz,
+20~MHz bandwidth, 30~kHz subcarrier spacing, single-antenna TDD,
+single-user scenario).
+
+The gNB and UE communicated normally during standard operation. The jammer
+proxy introduced a configurable CW interference signal after slot~2000,
+injecting at 100~kHz frequency offset with amplitude~0.8. Runtime
+execution was monitored via command-line logs to verify gNB
+initialization, UE attachment, and jammer activation.
+
+
+\textit{Testbed limitation:} ZMQ-based transport introduces padding values
+into the receive buffer during certain quiet-symbol intervals. Some
+captured IQ samples therefore reflect simulation transport behavior rather
+than true ambient RF. This does not invalidate the threshold-based
+detection results — which rely on the jammer proxy's synchronized log
+values rather than raw IQ power — but it does mean the present results
+should be interpreted as a controlled software testbed study. A future
+USRP hardware implementation would capture actual ambient RF and jammer
+energy directly.
+
+
+% -----------------------------------------------------------------------
+\section{Results}
+% -----------------------------------------------------------------------
+
+\subsection{Jammer Injection and Measurement Overview}
+
+Experiments were conducted to evaluate jammer detection using the proposed
+scheduler-based sensing pipeline. A total of 9454 sensing measurements
+were recorded: 501 jammer OFF samples (slots 0--1999) and 8953 jammer ON
+samples (slots 2000 onward), as summarized in Table~\ref{tab:dataset_stats}.
+
+Before jammer activation the average measured SNR was approximately
+$11.07$~dB. After activation the SNR dropped sharply to approximately
+$-91.10$~dB, indicating severe communication degradation. Simultaneously,
+measured jammer power increased from 0 to approximately 0.64. These
+feature shifts establish a clear distinction between the two states and
+motivate the threshold-based detection results presented below.
+
+\begin{table}[htbp]
+\centering
+\caption{Dataset statistics under jammer OFF and jammer ON conditions.}
+\label{tab:dataset_stats}
+\begin{tabular}{l r}
+\hline
+\textbf{Metric} & \textbf{Value} \\
+\hline
+Total samples & 9454 \\
+Jammer OFF samples & 501 \\
+Jammer ON samples & 8953 \\
+Class ratio (OFF:ON) & 1:18 \\
+SNR mean (OFF) & 11.07 dB \\
+SNR std.\ (OFF) & 31.23 dB \\
+SNR mean (ON) & $-$91.10 dB \\
+SNR std.\ (ON) & 26.34 dB \\
+Jammer power mean (OFF) & 0.00 \\
+Jammer power std.\ (OFF) & 0.00 \\
+Jammer power mean (ON) & 0.64 \\
+Jammer power std.\ (ON) & 0.00 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Feature Behavior Over Time}
+
+Fig.~\ref{fig:jammer_power_time} shows jammer power over time, split by
+jammer state. The OFF samples cluster near zero; the ON samples cluster
+near 0.64 with no visible overlap. Fig.~\ref{fig:snr_time} shows the
+measured SNR over time. During normal operation SNR is high and positive;
+after jammer activation it collapses to strongly negative values, with
+intermittent spikes caused by repeated UE reconnection attempts.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Jammer Power on:off.png}
+    \caption{Jammer power versus time for jammer OFF and jammer ON conditions.}
+    \label{fig:jammer_power_time}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{SNR_time.png}
+    \caption{SNR versus time under jammer sensing conditions.}
+    \label{fig:snr_time}
+\end{figure}
+
+\subsection{Threshold-Based Jammer Detection}
+
+Three threshold-based detectors were evaluated; numerical performance is
+summarized in Table~\ref{tab:detection_performance}.
+
+
+\begin{table}[htbp]
+\centering
+\caption{Performance of threshold-based jammer detectors.}
+\label{tab:detection_performance}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{l r r r r r r r r r}
+\hline
+\textbf{Detector} & \textbf{Thresh.} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{TP} & \textbf{TN} & \textbf{FP} & \textbf{FN} \\
+\hline
+SNR-based         & $-$40.02 dB & 92.18\% & 100\% & 91.74\% & 0.957 & 8214 & 501 & 0 & 739 \\
+Jammer-power      & 0.320       & \textbf{100\%}   & 100\% & 100\%   & 1.000 & 8953 & 501 & 0 & 0 \\
+Combined          & N/A         & \textbf{100\%}   & 100\% & 100\%   & 1.000 & 8953 & 501 & 0 & 0 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+Fig.~\ref{fig:snr_detection} shows the SNR-based detector. The jammer
+OFF and ON SNR distributions are substantially separated, but some spread
+near the threshold leaves the classes imperfectly separable. The detector
+achieved 92.18\% accuracy with 739 false negatives and an F1-score of
+0.957. The false negatives correspond to intermittent SNR spikes during
+UE reconnection attempts, which temporarily push jammer-ON measurements
+above the threshold.
+
+Fig.~\ref{fig:jammer_power_detection} shows the jammer-power-based
+detector. The OFF and ON distributions are completely disjoint: all OFF
+values sit at exactly 0 and all ON values sit at 0.64. The detector
+achieved 100\% accuracy with F1 = 1.0 and no errors, providing the
+strongest first-stage detection feature.
+
+The combined detector (Eq.~\eqref{eq:combined_det}) also achieves 100\%
+accuracy and F1 = 1.0, but does not improve on the jammer-power detector
+alone. This is expected: jammer power already provides perfect separation
+in the current dataset, so adding the SNR criterion contributes nothing
+extra. Its value would likely emerge under more challenging conditions
+(see Section~\ref{sec:discussion}).
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{SNR Jammer Detection.png}
+    \caption{SNR-based jammer detection histogram. The vertical red line
+    marks the decision threshold at $-$40.02~dB.}
+    \label{fig:snr_detection}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Jammer Power Detection.png}
+    \caption{Jammer-power-based detection histogram. The two classes are
+    completely separated with no overlap.}
+    \label{fig:jammer_power_detection}
+\end{figure}
+
+\subsection{MUSIC Localization Baseline}
+
+To support the future localization stage, a separate MATLAB simulation
+validated a MUSIC-based AoA baseline using a 3-element ULA.
+Fig.~\ref{fig:music_result} presents four diagnostics:
+\begin{itemize}
+    \item \textbf{CSI phase:} Approximately stable across subcarriers for
+          all three antennas, indicating a well-conditioned input with
+          preserved spatial phase structure.
+    \item \textbf{I-Q constellation:} Tight clustering confirms acceptable
+          baseband signal integrity.
+    \item \textbf{Covariance eigenvalues:} One dominant eigenvalue,
+          consistent with a rank-1 single-source assumption.
+    \item \textbf{MUSIC pseudospectrum:} Clear dominant peak aligned with
+          the $25^\circ$ ground-truth angle.
+\end{itemize}
+Together these results confirm that the MUSIC estimator correctly isolates
+the signal subspace~\cite{1143830} and provides a valid localization
+baseline for Phase~2 integration.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\linewidth]{MUSIC_Simulation_result.png}
+    \caption{MUSIC-based angle-of-arrival estimation baseline: CSI phase
+    (top-left), I-Q constellation (bottom-left), covariance eigenvalues
+    (top-right), and MUSIC pseudospectrum with peak at $25^\circ$
+    (bottom-right).}
+    \label{fig:music_result}
+\end{figure}
+
+
+% -----------------------------------------------------------------------
+\section{Discussion}
+\label{sec:discussion}
+% -----------------------------------------------------------------------
+
+\textbf{Detection performance.}
+Jammer activity produces strong, consistent feature changes: mean SNR
+drops from 11.07~dB to $-$91.10~dB and mean jammer power rises from 0 to
+0.64 (Table~\ref{tab:dataset_stats}). The jammer-power detector achieves
+perfect classification (F1 = 1.0), while the SNR detector achieves F1 =
+0.957. The 739 SNR false negatives arise from UE reconnection spikes that
+temporarily elevate measured SNR during the jammer-ON period, reflecting
+the greater variability of SNR as a communication-quality metric.
+
+\textbf{Class imbalance.}
+The dataset contains roughly 18$\times$ more jammer-ON than jammer-OFF
+samples (Table~\ref{tab:dataset_stats}), a direct consequence of the
+experimental design: jammer activation was delayed to slot~2000 to
+establish a clean baseline, leaving a short OFF window. Because the
+jammer-power detector has zero FP and zero FN, the imbalance does not
+affect its evaluation; all metrics equal 1.0 regardless of class weights.
+The SNR detector is similarly unaffected by imbalance in the FP direction
+(zero FP), and precision remains 100\%. Future experiments should balance
+the class distribution more carefully or apply stratified cross-validation
+to ensure that results generalize across different ON/OFF ratios.
+
+
+
+\textbf{Testbed limitations.}
+As noted in Section~II-D, the ZMQ transport introduces IQ padding
+artifacts during quiet-symbol intervals. The present detection results
+are not invalidated by this — they rely on the proxy log values rather
+than raw IQ power — but a hardware deployment on USRP radios is required
+before the IQ-domain features needed for MUSIC-based localization can be
+captured reliably from actual RF.
+
+
+\textbf{Interpreting the 100\% accuracy result.}
+Perfect classification in a detection experiment warrants scrutiny. In
+the current setup, jammer power is logged directly by the proxy — it
+reflects the injected signal amplitude rather than an estimated RF
+quantity derived from IQ data. The separation is therefore exact by
+construction: OFF samples carry exactly 0 power and ON samples carry
+exactly 0.64. This result demonstrates that the \emph{measurement
+pipeline} reliably captures jammer state, but it does not yet establish
+robustness against realistic impairments such as multipath fading,
+antenna pattern variation, background interference, or jammers that
+modulate their power over time. SNR, with its 92.18\% accuracy, is a
+better proxy for true RF-domain difficulty.
+
+\textbf{Combined detector.}
+The combined detector matches jammer-power performance exactly,
+confirming that jammer power dominates in the current experiment. This
+does not imply SNR is irrelevant: in a hardware deployment with fading or
+when the jammer amplitude varies, SNR may provide complementary evidence
+that improves robustness. A weighted fusion or machine-learning classifier
+could exploit both features more flexibly in future work.
+
+\textbf{MUSIC baseline and Phase 2 roadmap.}
+The stable CSI phase, tight I-Q clustering, dominant covariance
+eigenvalue, and 25$^\circ$-aligned pseudospectrum peak confirm that the
+MUSIC estimator is correctly isolating the signal subspace~\cite{1143830}.
+The planned Phase~2 integration proceeds in three steps: (i) port IQ
+capture from ZMQ to USRP hardware; (ii) extract per-subcarrier CSI
+matrices from the quiet-window samples; and (iii) feed a multi-antenna
+MUSIC pipeline with those CSI matrices to estimate jammer AoA in near
+real time. Combining AoA from two or more gNBs will then yield a
+2-D jammer position estimate.
+
+\textbf{Summary.}
+Communication-driven sensing opportunities created through scheduling are
+sufficient for reliable first-stage jammer detection in an open-source 5G
+framework. Jammer power is the most discriminative feature under the
+present conditions, while SNR remains a useful secondary feature whose
+value will likely grow in more challenging RF environments. These findings
+validate the low-overhead sensing architecture and establish a concrete
+roadmap for extending the system to near-real-time jammer localization.
+
+
+% -----------------------------------------------------------------------
+\section*{Acknowledgments}
+% -----------------------------------------------------------------------
+
+This work was conducted as part of the Master of Electrical and Computer
+Engineering program at Rice University. The authors acknowledge the
+academic support and institutional resources provided by Rice University,
+as well as the guidance and feedback from Dr.\ Rahman Doost throughout
+the project. The statements made in this work are solely the
+responsibility of the authors.
+
+
+
+\section*{CRediT Author Statement}
+
+\textbf{Sandra Mansour:} Software, Formal analysis, Visualization,
+Writing---Original draft. \textbf{Samanvitha Balijepalli:}
+Investigation, Algorithm analysis, Writing---Review \& Editing.
+\textbf{Aniket Jadhav:} Investigation, Methodology, Software.
+\textbf{Dr.\ Rahman Doost:} Conceptualization, Supervision, Project
+administration, Resources, Writing---Review \& Editing.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
