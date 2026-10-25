@@ -1,0 +1,499 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+
+\title{Near-Real-Time ISAC-Based Jammer Detection and Localization using OCUDU\\}
+
+\author{
+    % Group all 4 authors in a single block
+    \IEEEauthorblockN{
+        Samanvitha Balijepalli\IEEEauthorrefmark{1}, 
+        Aniket Jadhav\IEEEauthorrefmark{1}, 
+        Sandra Mansour\IEEEauthorrefmark{1}, and 
+        Rahman Doost-Mohammady\IEEEauthorrefmark{2}
+    }
+    
+    % Provide the shared department and university details
+    \IEEEauthorblockA{
+        Department of Electrical and Computer Engineering \\
+        Rice University, Houston, USA \\
+        % Group or list the emails cleanly linked by the refmarks
+        Email: \IEEEauthorrefmark{1}\{sb273, aj156, sm367\}@rice.edu, 
+               \IEEEauthorrefmark{2}doost@rice.edu
+    }
+    }
+
+\maketitle
+
+\begin{abstract}
+Malicious jammers threaten wireless communication systems, yet detecting and
+localizing them often requires dedicated RF sensing hardware that is costly to
+deploy and difficult to scale. This work presents a software-defined 5G
+framework for jammer detection and localization using OCUDU together with
+existing communication infrastructure. The first phase introduced low-overhead
+sensing opportunities within the 5G NR frame and demonstrated reliable jammer
+detection, with jammer-power-based detection achieving an F1-score of $1.0$ and
+SNR-based detection achieving $92.18\%$ accuracy. The system has since been
+extended to a live 5G NR testbed operating on band n78 using a USRP~B210, a
+Quectel 5G modem, and an ADALM-Pluto jammer. Current localization work focuses
+on multi-antenna direction estimation using ESPRIT, with MUSIC retained as a
+baseline. The proposed architecture uses two spatially separated four-antenna
+sensing stations to estimate jammer azimuth and elevation and combine these
+measurements to determine the jammer's three-dimensional position $(x, y, z)$.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Integrated Sensing and Communication (ISAC), jammer detection, jammer
+localization, 5G NR, wireless sensing, threshold-based detection,
+ESPRIT, angle-of-arrival
+\end{IEEEkeywords}
+
+
+% -----------------------------------------------------------------------
+\section{Introduction}
+% -----------------------------------------------------------------------
+
+Malicious radio-frequency (RF) jammers pose an increasingly significant threat to modern wireless systems. By transmitting continuous-wave, broadband, or other forms of interference, jammers can degrade LTE/5G communication links and disrupt safety-critical wireless services. Conventional jammer detection and localization systems often rely on dedicated spectrum-monitoring receivers, direction-finding antennas, and other specialized RF hardware. Although effective, these approaches increase deployment cost and can be difficult to scale or adapt as communication systems evolve. This motivates the development of software-defined sensing approaches that reuse existing communication infrastructure for jammer detection and localization.
+
+Integrated Sensing and Communication (ISAC) provides a framework in which communication infrastructure can simultaneously support data transmission and environmental sensing. By reusing existing radio resources and hardware, ISAC can reduce the need for separate sensing infrastructure while enabling functions such as interference detection and source localization. Open and programmable 5G platforms are particularly useful for this purpose because they provide access to radio scheduling and physical-layer measurements that are typically hidden in commercial systems. The current implementation uses OCUDU~\cite{ocudu_project} together with Open5GS~\cite{open5gs_site} to provide a programmable 5G environment for jammer sensing and localization.
+
+The first phase of this work developed a low-overhead jammer sensing and detection framework by introducing periodic quiet sensing opportunities within the 5G NR frame~\cite{3gpp38211}. During these intervals, the receiver can observe interference without expected user-equipment (UE) transmission. The resulting framework demonstrated reliable jammer detection, with jammer-power-based detection achieving an F1-score of 1.0 and SNR-based detection achieving $92.18\%$ accuracy. The system has since been extended from a software-based environment to a live 5G NR testbed operating on band n78 using a USRP B210, a Quectel 5G modem as the UE, and an ADALM-Pluto as the jammer source.
+
+The current phase focuses on extending jammer sensing toward three-dimensional localization. Complex multi-antenna RF measurements are collected to estimate the direction from which the jammer signal arrives. MUSIC is retained as a baseline direction-of-arrival (DoA) algorithm, while ESPRIT is being investigated as the primary approach because it estimates direction using the rotational relationship between spatially shifted antenna subarrays without requiring an angular grid search. The proposed architecture uses two spatially separated sensing stations, each ultimately equipped with four receive antennas, to estimate jammer azimuth and elevation. The directional measurements from the two stations are then combined to estimate the jammer's three-dimensional position $(x,y,z)$.
+
+The main contributions of this work are: (i) a low-overhead, scheduler-based sensing framework for jammer detection within a 5G NR system; (ii) validation of jammer sensing and AoA behavior on a live 5G NR hardware testbed; (iii) investigation of ESPRIT-based multi-antenna direction estimation, with MUSIC retained as a reference method; and (iv) development of a two-station architecture for three-dimensional jammer localization. Together, these components provide a path toward near-real-time jammer detection and localization using programmable 5G infrastructure with limited additional sensing hardware.
+
+
+\subsection*{Related Work}
+Chiarello et al.~\cite{9569600} proposed a jammer-detection technique based on
+subcarrier blanking for 5G and beyond systems. In their approach, selected
+time-frequency resources are intentionally left unused by legitimate
+transmissions, allowing unexpected energy received in the blanked resources to
+indicate jammer activity. Their work demonstrates the usefulness of creating
+silent communication resources for interference sensing, but focuses on jammer
+detection rather than determining the jammer's physical location.
+
+For localization, Menta et al.~\cite{article1} investigated AoA-based
+localization in 5G ultra-dense networks using multiple Transmission-Reception
+Points (TRPs). Each TRP estimates the AoA of an uplink signal, and the resulting
+measurements are combined using an Extended Kalman Filter to estimate and track
+the transmitter's two-dimensional position. This work demonstrates the
+feasibility of combining directional measurements from multiple cellular
+sensing locations, although it considers a cooperative UE rather than an
+uncooperative jammer and focuses primarily on two-dimensional localization.
+
+Estimating a jammer's complete spatial direction also requires both azimuth and
+elevation information. Dong et al.~\cite{article2} proposed a two-dimensional
+DoA estimation approach using an L-shaped antenna array consisting of two
+perpendicular uniform linear arrays. The geometry enables estimation of both
+azimuth and elevation from the received signals. Their work demonstrates the
+use of multi-dimensional antenna arrays for obtaining the directional
+information needed for three-dimensional localization, although it focuses on
+DoA estimation rather than determining the complete $(x,y,z)$ position of a
+source using multiple sensing stations.
+
+High-resolution subspace methods provide several approaches for obtaining these
+directional estimates. MUSIC, introduced by Schmidt~\cite{1143830}, separates
+the signal and noise subspaces of the array covariance matrix and evaluates a
+pseudospectrum to determine likely source directions. Root-MUSIC~\cite{45540}
+replaces the angular grid search with polynomial rooting, while
+ESPRIT~\cite{32276} exploits rotational invariance between shifted antenna
+subarrays to estimate direction directly. The reduced need for angular
+searching makes ESPRIT particularly attractive for near-real-time localization,
+although its effectiveness depends on suitable antenna geometry and accurate
+phase relationships between receive channels. Sparse reconstruction
+techniques~\cite{inbook} provide another approach to DoA estimation but can
+introduce greater computational complexity.
+
+SpotFi~\cite{article} demonstrated that complex OFDM measurements across
+antennas and subcarriers can be used for localization and multipath resolution.
+SpotFi exploits both spatial and frequency-domain phase information to
+distinguish propagation paths and identify a likely direct path. However,
+SpotFi operates in a cooperative Wi-Fi environment where channel state
+information is available from normal communication transmissions. In the
+jammer-localization problem considered here, the jammer is uncooperative and
+conventional UE channel estimates may not be available during quiet sensing
+resources. The proposed system therefore operates on complex multi-antenna RF or
+frequency-domain resource-grid measurements that preserve the relative phase
+information required for DoA estimation.
+
+The proposed work combines concepts from these prior approaches. Quiet
+communication resources provide opportunities for jammer sensing, multi-antenna
+processing provides azimuth and elevation estimates, and measurements from two
+spatially separated sensing stations are combined to determine the jammer's
+three-dimensional position. Unlike prior work that addresses only jammer
+detection, cooperative UE localization, or single-array DoA estimation, the
+objective is to integrate these components into a near-real-time 5G jammer
+detection and three-dimensional localization framework.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.48\textwidth]{Abstract.png}
+    \caption{Joint communication and sensing framework for jammer detection
+    and localization using data-scheduling-based sensing opportunities in a
+    5G gNB. Phase 1 established jammer detection. The current phase extends the framework to multi-antenna direction estimation and two-station 3D localization using ESPRIT, with MUSIC retained as a baseline.}
+    \label{fig:system_framework}
+\end{figure}
+
+
+% -----------------------------------------------------------------------
+\section{Methodology}
+% -----------------------------------------------------------------------
+
+\subsection{System Architecture}
+
+The proposed system is built on the OCUDU~\cite{ocudu_project} 5G software
+stack and uses communication-driven sensing opportunities to detect and
+eventually localize jammer activity without dedicated sensing hardware.
+The full platform consists of an Open5GS~\cite{open5gs_site} core network,
+a modified OCUDU gNB running on a USRP~B210 radio, a Quectel 5G modem acting
+as the UE, and an ADALM-Pluto jammer. All signals, including uplink traffic
+and jammer interference, are exchanged over the air, as shown in
+Fig.~\ref{fig:system_flowchart}.
+
+The gNB was modified to create sensing opportunities, described in the next
+subsection, during which the UE is silent and the receiver captures ambient RF
+energy, interference, and jammer-induced signal components. The
+frequency-domain samples from these slots are stored for post-processing. Each
+recording is divided into jammer-OFF and jammer-ON phases according to the time
+at which the jammer is switched on, providing the ground-truth labels needed
+for detection and localization evaluation.
+
+A post-processing layer converts the captured grids and logs into data
+structures for offline analysis. In the current stage, sensing is performed
+using the interference floor and the spatial structure of the received signal
+across the two receive antennas, processed by lightweight threshold-based
+detectors and a phase-difference angle-of-arrival (AoA) estimator. The
+longer-term goal is to extend this pipeline toward four-antenna ESPRIT
+direction estimation and three-dimensional localization.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{System Architecture.png}
+    \caption{System architecture and processing flow for the proposed
+    sensing framework.}
+    \label{fig:system_flowchart}
+\end{figure}
+
+\subsection{Sensing-Slot Capture}
+
+To observe the jammer without dedicated sensing hardware, we need uplink
+samples in which the UE is silent, so that only noise, interference, and the
+jammer are present. We used two mechanisms in the gNB.
+
+\textbf{Scheduler-reserved symbols.} We modified the gNB scheduler so that, on
+every fourth slot, uplink grants end at symbol~10, leaving the remaining
+symbols free for sensing. The reservation is enabled by an environment flag and
+was confirmed to fire in the same slot of each frame. In our captures, however,
+the reserved symbols did not become UE-silent: with the single-layer (rank-1)
+uplink of our UE, the scheduler repacked the data into fewer symbols instead of
+leaving a gap, so no jammer-only symbols appeared.
+
+\textbf{Per-slot uplink tap.} We therefore added a read-only tap inside the
+gNB's upper PHY that fires on every received uplink slot, scheduled or not, and
+records the full frequency-domain grid (612 subcarriers on both receive ports)
+once per slot. Slots in which the UE has nothing to send contain only noise,
+interference, and the jammer. Spacing the uplink traffic (e.g.\ pings at
+0.3~s intervals) makes about 43\% of slots idle, so the live gNB itself
+supplies jammer-only samples without any scheduler change.
+
+This second mechanism depends on spare uplink capacity, which will not exist
+under sustained traffic. Reliable sensing in production therefore requires the
+gNB to reserve whole uplink slots for sensing, and extending the scheduler
+reservation from symbols to slots is part of the planned work.
+
+\subsection{Detection and Localization Processing Framework}
+\label{sec:aoa}
+
+Let $Y_{p,k,s}$ denote the received resource element on receive port
+$p\in\{0,1\}$, subcarrier $k\in\{1,\dots,612\}$, and uplink slot $s$. The
+energy of slot $s$ is
+\begin{equation}
+P_s=\frac{1}{2\cdot 612}\sum_{p=0}^{1}\sum_{k=1}^{612}\lvert Y_{p,k,s}\rvert^{2}.
+\end{equation}
+Let $\mathcal S_q$ be the set of the fraction $q$ of slots with the lowest
+energy in a recording, which are the UE-silent slots. The interference floor
+and its rise between the jammer-OFF and jammer-ON phases are
+\begin{equation}
+P_{\mathrm{floor}}=\frac{1}{\lvert\mathcal S_q\rvert}\sum_{s\in\mathcal S_q}P_s,
+\qquad
+\Delta P=10\log_{10}\frac{P_{\mathrm{floor}}^{\mathrm{ON}}}{P_{\mathrm{floor}}^{\mathrm{OFF}}}.
+\end{equation}
+
+Define the two-antenna snapshot $\mathbf x_{k,s}=[Y_{0,k,s},\,Y_{1,k,s}]^{T}$.
+The spatial covariance matrix over the UE-silent slots is
+\begin{equation}
+\hat{\mathbf R}=\frac{1}{K}\sum_{s\in\mathcal S_q}\sum_{k}\mathbf x_{k,s}\mathbf x_{k,s}^{H},
+\end{equation}
+where $K$ is the number of snapshots. With eigenvalues
+$\lambda_1\ge\lambda_2$ of $\hat{\mathbf R}$, we use the eigenvalue ratio and
+the spatial coherence,
+\begin{equation}
+\rho=10\log_{10}\frac{\lambda_1}{\lambda_2},
+\qquad
+\gamma=\frac{\lvert\hat R_{12}\rvert}{\sqrt{\hat R_{11}\hat R_{22}}}.
+\end{equation}
+A large $\rho$ and a high $\gamma$ indicate a single spatially coherent source,
+which in UE-silent slots is the jammer.
+
+For a feature $f\in\{P_{\mathrm{floor}},\gamma\}$, the class statistics are
+the sample mean and standard deviation of the OFF and ON recordings,
+\begin{equation}
+\mu_f=\frac{1}{N}\sum_{i=1}^{N}f_i,\qquad
+\sigma_f=\sqrt{\frac{1}{N-1}\sum_{i=1}^{N}(f_i-\mu_f)^2}.
+\end{equation}
+Using the class means, the midpoint threshold and threshold detector are
+\begin{equation}
+T_f=\frac{\mu_{f,\mathrm{OFF}}+\mu_{f,\mathrm{ON}}}{2},\qquad
+\hat y_f(i)=\begin{cases}1,& f_i>T_f\\0,&\text{otherwise,}\end{cases}
+\end{equation}
+and the combined detector declares a jammer if either feature detector fires,
+$\hat y_{\mathrm C}(i)=\hat y_{P_{\mathrm{floor}}}(i)\lor\hat y_{\gamma}(i)$.
+
+For direction estimation, the phase difference between the two receive chains
+gives the jammer azimuth. With antenna spacing $d$ and wavelength $\lambda$,
+\begin{equation}
+\Delta\varphi=\arg\hat R_{12}-\varphi_0,\qquad
+\theta=\arcsin\!\Big(\frac{\lambda\,\Delta\varphi}{2\pi d}\Big),
+\end{equation}
+where $\varphi_0$ is a fixed phase offset between the two receive chains caused
+by cable and RF mismatch. We measure it once with the jammer at boresight,
+$\varphi_0=\arg\hat R_{12}\big|_{\theta=0}$, and reuse it as long as the
+cabling is unchanged.
+
+Two antennas give a single bearing angle and coarse resolution. The next phase
+uses two stations, each with a $2\times2$ planar array. For a source at polar
+angle $\theta$ and azimuth $\phi$, let $u=\sin\theta\cos\phi$ and
+$v=\sin\theta\sin\phi$. With wavenumber factor $\kappa=2\pi d/\lambda$, the
+steering vector of element $(m,n)$ is
+$a_{mn}=\exp\!\big(j\kappa(mu+nv)\big)$, $m,n\in\{0,1\}$. ESPRIT uses the
+shift invariance between element pairs along each array axis: with signal
+subspace $\mathbf E_s$ of $\hat{\mathbf R}$ and selection matrices
+$\mathbf J_{x1},\mathbf J_{x2}$,
+\begin{equation}
+\boldsymbol\Psi_x=(\mathbf J_{x1}\mathbf E_s)^{\dagger}\mathbf J_{x2}\mathbf E_s,
+\qquad u=\frac{\arg\lambda_x}{\kappa},
+\end{equation}
+where $\lambda_x$ is the eigenvalue of $\boldsymbol\Psi_x$, and likewise
+$v=\arg\lambda_y/\kappa$ from $\boldsymbol\Psi_y$. This gives
+$(\theta,\phi)$ in closed form without a grid search~\cite{32276}. Each
+station $i$ at known position $\mathbf p_i$ then yields a unit direction vector
+$\mathbf d_i$, and the jammer position is the least-squares point closest to
+both rays,
+\begin{equation}
+\hat{\mathbf s}=\Big(\sum_{i=1}^{2}\big(\mathbf I-\mathbf d_i\mathbf d_i^{T}\big)\Big)^{-1}
+\sum_{i=1}^{2}\big(\mathbf I-\mathbf d_i\mathbf d_i^{T}\big)\mathbf p_i,
+\end{equation}
+which gives $(x,y,z)$. The ESPRIT and triangulation stages are planned and have
+not yet been evaluated.
+
+\subsection{Test Environment}
+
+All experiments were run indoors on a live 5G NR testbed in band n78 (center
+frequency 3489.42~MHz, 20~MHz bandwidth, 30~kHz subcarrier spacing, TDD,
+single-user scenario). The gNB is OCUDU running on a laptop with Linux OS,
+connected to a USRP~B210 with two receive antennas, together with an Open5GS
+core network. The UE is a Quectel RM520N-GL modem connected to a second
+laptop, which generates uplink traffic with iperf3. The jammer is an
+ADALM-Pluto transmitting broadband noise co-channel in the same band, with its
+antenna co-polarized with the gNB antenna.
+
+The jammer was placed about 30~cm from the gNB antennas and the UE about 2~m
+from the gNB. To obtain an angle swing, the jammer was moved between two
+positions while the gNB and UE stayed fixed. Runtime execution was monitored
+through the gNB logs to verify gNB initialization, UE attachment, and jammer
+activation.
+
+\textit{Testbed limitation:} the B210 provides only two receive antennas, so
+the current testbed yields a single bearing angle with coarse resolution, and
+each test case was recorded once. The four-antenna radios planned for the next
+phase remove the first limitation.
+
+\textit{Planned hardware:} the next phase replaces the B210 sensors with two
+radios, each with four antennas arranged as a $2\times2$ planar matrix, placed
+at least about 5~m apart. These radios use an O-RAN 7.2 split, so raw IQ is
+not available and the AoA pipeline will work from per-antenna frequency-domain
+resource elements exposed on the fronthaul. As with the B210, a one-time
+per-antenna phase calibration will be required.
+
+% -----------------------------------------------------------------------
+\section{Results}
+% -----------------------------------------------------------------------
+
+\subsection{Recorded Measurements}
+
+Measurements were recorded on the hardware testbed described in
+Section~II-D (Fig.~\ref{fig:testbed}), with the jammer about 30~cm from the gNB
+and the UE about 2~m from the gNB. The main recording contains 9005 uplink
+slots, of which about 43\% are idle. UE-silent slots were taken as the quietest
+$q=20\%$ of slots in each recording ($q=30\%$ in the two-position analysis). Each test case was recorded once, so the
+results below are single-run observations without repeats or confidence
+intervals.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{testbed_setup.png}
+    \caption{Hardware testbed: USRP~B210 gNB radio, Quectel UE, and ADALM-Pluto
+    jammer.}
+    \label{fig:testbed}
+\end{figure}
+
+\subsection{Jammer Detection from Sensing Slots}
+
+Table~\ref{tab:hw_detect} summarizes detection from UE-silent slots. In the
+quietest 20\% of uplink slots, the interference floor rose from 0.0014 to
+0.0053 when the jammer was switched on, a rise of 5.9~dB. In the jammer-ON recording, no slot fell as low as the jammer-OFF floor,
+because the jammer lifted the floor of every slot. The spatial coherence between the two antennas rose from
+approximately 0.12 to 0.9, and the covariance eigenvalue ratio reached up to
+16.8~dB in the strongest run. An earlier raw-IQ capture, taken with the gNB
+stopped, showed the same behavior: the eigenvalue ratio was 0.9~dB without the
+jammer and 16.6--17.3~dB with the jammer at two positions. With one recording per condition, the threshold detectors defined in Section~II-C are not yet evaluated statistically, so the features are reported
+directly.
+
+\begin{table}[htbp]
+\centering
+\caption{Sensing-slot detection metrics, jammer OFF vs.\ ON (single run).}
+\label{tab:hw_detect}
+\begin{tabular}{l c c}
+\hline
+\textbf{Metric} & \textbf{OFF} & \textbf{ON} \\
+\hline
+Idle-slot interference floor & 0.0014 & 0.0053 \\
+Floor rise & \multicolumn{2}{c}{5.9 dB} \\
+Spatial coherence & $\approx$0.12 & $\approx$0.9 \\
+Max.\ eigenvalue ratio & --- & 16.8 dB \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Jammer Localization from Phase Difference}
+
+The hardware phase offset was calibrated once at $\varphi_0=-1.857$~rad
+($-106.4^\circ$), with the jammer at boresight (coherence 0.953, eigenvalue
+ratio 16.2~dB). The calibrated estimate was validated physically: a jammer
+placed near boresight read approximately $7.8^\circ$.
+
+The jammer was then moved between two positions. The calibrated AoA moved from
+$-49.3^\circ$ to $+28.0^\circ$, a swing of about $77^\circ$ that follows the
+physical move (Table~\ref{tab:hw_aoa}, Fig.~\ref{fig:hw_aoa}). Position~1 gives
+a strong, clean measurement. At position~2 the jammer signal was weaker, which
+lowers the coherence to 0.552 and the floor rise to 1.9~dB, so that estimate is
+less reliable.
+
+\begin{table}[htbp]
+\centering
+\caption{Calibrated AoA at two jammer positions (single run each).}
+\label{tab:hw_aoa}
+\begin{tabular}{l c c c}
+\hline
+\textbf{Position} & \textbf{AoA} & \textbf{Coherence} & \textbf{Floor rise} \\
+\hline
+1 & $-49.3^\circ$ & 0.788 & 4.5 dB \\
+2 & $+28.0^\circ$ & 0.552 & 1.9 dB \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{aoa_positions.png}
+    \caption{Calibrated AoA versus jammer position, showing the $77^\circ$ swing
+    between the two positions.}
+    \label{fig:hw_aoa}
+\end{figure}
+\section{Discussion}
+
+\textbf{Dataset quality and measurement repeatability.} The structured hardware sweep provides labeled measurements for evaluating jammer detection and localization under controlled
+over-the-air conditions. Residual variation may
+arise from changes in multipath propagation, antenna placement, transmitter--receiver alignment, and hardware-level gain or phase differences. In particular, the indoor environment introduces
+position-dependent reflections that can alter the observed signal power and spatial response even when the nominal configuration remains unchanged. These effects are important when interpreting detection performance and AoA estimates, since variations in the received signal may reflect both jammer activity and propagation conditions. Consequently, the dataset establishes an experimental baseline for assessing the robustness of software-defined sensing
+under practical wireless conditions.
+
+
+\textbf{MUSIC--ESPRIT trade-offs for AoA estimation.}
+MUSIC and ESPRIT offer complementary approaches to estimating
+the direction of an incident signal. MUSIC estimates AoA by
+searching a spatial spectrum, allowing the angular search region
+and resolution to be controlled explicitly. However, its
+computational cost increases with the density of the angular
+grid, and its performance can degrade under low-SNR conditions,
+limited snapshots, and multipath-induced source correlation.
+ESPRIT instead exploits rotational invariance between appropriately
+constructed subarrays to estimate AoA without an explicit angular
+grid search, making it attractive for computationally efficient
+localization. With four array elements, the idealized MUSIC
+formulation can accommodate up to three uncorrelated sources
+under suitable assumptions, whereas ESPRIT using two-element
+subarrays is limited to one identifiable source in the
+corresponding single-source formulation. These limits depend on
+the array model, signal-subspace rank, and estimation conditions.
+
+ Furthermore, classical ESPRIT
+requires an appropriate shift-invariant array structure, and
+hardware calibration errors can violate the assumed array model.
+The choice between the two estimators must therefore be informed
+by both the measured performance and the antenna geometry used
+in the deployment.
+
+\textbf{Limitations and future work.}
+The current evaluation is limited to an indoor environment and
+a single jammer type, restricting the extent to which the results
+can be generalized to different propagation conditions,
+interference waveforms, and deployment scenarios. The
+$2\times2$ antenna configuration also limits the available
+spatial aperture and the ability to resolve closely spaced
+directions or estimate elevation reliably. In addition,
+two-dimensional position estimation from measurements at the
+two receiving stations has not yet been fully evaluated.
+Further work will investigate localization accuracy across
+different jammer positions, signal-to-interference conditions,
+and multipath configurations, while quantifying the trade-off
+between estimation accuracy and computational cost for MUSIC
+and ESPRIT. Integration of the detection and localization
+pipeline into a Near-Real-Time RAN Intelligent Controller
+(xApp) is ongoing. This integration will enable future
+evaluation of end-to-end latency, sensing overhead, and
+localization performance within an Open RAN-based ISAC
+framework.
+
+The entire source code and related images are available at \href{https://github.com/AniketttJadhav/srsRAN-Open5GS}{this GitHub repository}.
+
+% -----------------------------------------------------------------------
+\section*{Acknowledgments}
+% -----------------------------------------------------------------------
+
+This work was conducted as part of the Master of Electrical and Computer
+Engineering program at Rice University. The authors acknowledge the
+academic support and institutional resources provided by Rice University,
+as well as the guidance and feedback from Dr.\ Rahman Doost throughout
+the project. The statements made in this work are solely the
+responsibility of the authors.
+
+
+
+\section*{CRediT Author Statement}
+
+\textbf{Sandra Mansour:} Software, Formal analysis, Visualization,
+Writing - Original draft, Reviewing and Editing. \textbf{Samanvitha Balijepalli:}
+Investigation, Algorithm analysis, Writing - Review \& Editing.
+\textbf{Aniket Jadhav:} Investigation, Methodology, Software.
+\textbf{Rahman Doost-Mohammady:} Conceptualization, Supervision, Project
+administration, Resources.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
